@@ -8,7 +8,7 @@ import time
 
 from google import genai
 
-from .config import GEMINI_API_KEY, GEMINI_MODEL, TRANSLATE_BATCH_SIZE, get_active_model
+from .config import GEMINI_API_KEY, GEMINI_MODEL, TRANSLATE_BATCH_SIZE, get_active_model, is_invalid_key_error
 from .models import NewsItem
 
 
@@ -124,7 +124,10 @@ class Translator:
                 error_str = str(e)
                 
                 # Se for erro 429 (rate limit), fazer retry com backoff
-                if "429" in error_str or "RESOURCE_EXHAUSTED" in error_str:
+                if is_invalid_key_error(e):
+                    print("[Tradutor] Erro crítico: A chave API do Gemini ativa no momento é inválida ou expirou. Verifique as configurações.", file=sys.stderr)
+                    break
+                elif "429" in error_str or "RESOURCE_EXHAUSTED" in error_str:
                     # Extrair tempo de retry sugerido se disponível
                     retry_match = re.search(r"retryDelay.*?(\d+)s", error_str)
                     wait_time = int(retry_match.group(1)) if retry_match else self.INITIAL_BACKOFF * (2 ** attempt)

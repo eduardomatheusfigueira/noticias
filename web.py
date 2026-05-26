@@ -208,7 +208,7 @@ def api_resumir_artigo():
     # 1. Carregar a API key ativa
     data_keys = _load_api_keys()
     key = data_keys.get("active", "")
-    from news.config import GEMINI_API_KEY, get_active_model
+    from news.config import GEMINI_API_KEY, get_active_model, is_invalid_key_error
     active_key = None
     if key:
         for entry in data_keys.get("keys", []):
@@ -284,15 +284,21 @@ Link: {url}
                 })
             except Exception as ex:
                 last_error = ex
-                if "429" in str(ex) or "RESOURCE_EXHAUSTED" in str(ex):
+                if is_invalid_key_error(ex):
+                    return jsonify({"erro": "A chave API do Gemini ativa no momento é inválida ou expirou. Por favor, acesse o menu 'Chaves & Modelos' e ative uma chave válida."}), 400
+                elif "429" in str(ex) or "RESOURCE_EXHAUSTED" in str(ex):
                     import time
                     time.sleep(2 * (attempt + 1))
                     continue
                 else:
                     break
+        if is_invalid_key_error(last_error):
+            return jsonify({"erro": "A chave API do Gemini ativa no momento é inválida ou expirou. Por favor, acesse o menu 'Chaves & Modelos' e ative uma chave válida."}), 400
         return jsonify({"erro": f"Erro na chamada do Gemini: {last_error}"}), 500
 
     except Exception as e:
+        if is_invalid_key_error(e):
+            return jsonify({"erro": "A chave API do Gemini ativa no momento é inválida ou expirou. Por favor, acesse o menu 'Chaves & Modelos' e ative uma chave válida."}), 400
         return jsonify({"erro": f"Erro interno ao gerar o resumo: {e}"}), 500
 
 

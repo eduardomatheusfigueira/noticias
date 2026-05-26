@@ -26,6 +26,12 @@ def get_active_model() -> str:
         pass
     return "gemini-2.5-flash"
 
+
+def is_invalid_key_error(error) -> bool:
+    """Verifica se uma exceção ou mensagem indica erro de chave inválida."""
+    err_str = str(error).lower()
+    return any(x in err_str for x in ["api_key_invalid", "api key not valid", "invalid api key", "chave inválida", "key not valid"])
+
 # ── Caminhos ──────────────────────────────────────────────────────────────────
 PROJECT_ROOT = _project_root
 CSV_PATH = _project_root / "Principais noticiarios do mundo - Noticiários gerais.csv"

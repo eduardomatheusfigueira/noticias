@@ -8,7 +8,7 @@ import requests
 from bs4 import BeautifulSoup
 from google import genai
 
-from ..config import GEMINI_API_KEY, GEMINI_MODEL, HTTP_HEADERS, HTTP_TIMEOUT, get_active_model
+from ..config import GEMINI_API_KEY, GEMINI_MODEL, HTTP_HEADERS, HTTP_TIMEOUT, get_active_model, is_invalid_key_error
 from ..models import Source, NewsItem, FetchResult
 from .base import BaseFetcher
 
@@ -118,11 +118,15 @@ class LLMFetcher(BaseFetcher):
             )
 
         except Exception as e:
+            if is_invalid_key_error(e):
+                err_msg = "A chave API do Gemini ativa é inválida ou expirou. Por favor, acesse o menu 'Chaves & Modelos' e ative uma chave válida."
+            else:
+                err_msg = f"Erro no LLM Fetcher: {e}"
             return FetchResult(
                 fonte=source,
                 estrategia_usada="llm",
                 sucesso=False,
-                erro=f"Erro no LLM Fetcher: {e}",
+                erro=err_msg,
             )
 
     def _fetch_page_text(self, url: str) -> str | None:
