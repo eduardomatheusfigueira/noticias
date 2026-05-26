@@ -6,7 +6,7 @@ import re
 
 from google import genai
 
-from .config import GEMINI_API_KEY, GEMINI_MODEL
+from .config import GEMINI_API_KEY, GEMINI_MODEL, get_active_model
 from .models import NewsItem
 
 
@@ -138,7 +138,7 @@ class Classifier:
 
         try:
             response = client.models.generate_content(
-                model=GEMINI_MODEL,
+                model=get_active_model(),
                 contents=prompt,
             )
             return response.text.strip()

@@ -8,7 +8,7 @@ import requests
 from bs4 import BeautifulSoup
 from google import genai
 
-from ..config import GEMINI_API_KEY, GEMINI_MODEL, HTTP_HEADERS, HTTP_TIMEOUT
+from ..config import GEMINI_API_KEY, GEMINI_MODEL, HTTP_HEADERS, HTTP_TIMEOUT, get_active_model
 from ..models import Source, NewsItem, FetchResult
 from .base import BaseFetcher
 
@@ -100,7 +100,7 @@ class LLMFetcher(BaseFetcher):
             )
 
             response = self._client.models.generate_content(
-                model=GEMINI_MODEL,
+                model=get_active_model(),
                 contents=prompt,
             )
 

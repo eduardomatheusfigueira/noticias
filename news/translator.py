@@ -8,7 +8,7 @@ import time
 
 from google import genai
 
-from .config import GEMINI_API_KEY, GEMINI_MODEL, TRANSLATE_BATCH_SIZE
+from .config import GEMINI_API_KEY, GEMINI_MODEL, TRANSLATE_BATCH_SIZE, get_active_model
 from .models import NewsItem
 
 
@@ -95,7 +95,7 @@ class Translator:
         for attempt in range(self.MAX_RETRIES):
             try:
                 response = self._client.models.generate_content(
-                    model=GEMINI_MODEL,
+                    model=get_active_model(),
                     contents=prompt,
                 )
 

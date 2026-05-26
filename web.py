@@ -1009,7 +1009,7 @@ HTML_PAGE = r"""<!DOCTYPE html>
             </div>
             <div class="source-list" id="sourceList"></div>
             <button class="settings-btn" onclick="openSettings()">
-                <span class="settings-icon">&#9881;</span> Configuracoes de API Keys
+                <span class="settings-icon">&#9881;</span> Chaves & Modelos
             </button>
         </aside>
 
@@ -1017,11 +1017,12 @@ HTML_PAGE = r"""<!DOCTYPE html>
         <div class="modal-overlay" id="settingsModal">
             <div class="modal">
                 <div class="modal-header">
-                    <h3>&#128273; Gerenciar API Keys do Gemini</h3>
+                    <h3>&#9881; Configurações do App</h3>
                     <button class="modal-close" onclick="closeSettings()">&times;</button>
                 </div>
                 <div class="modal-body">
-                    <div class="key-section-title">Adicionar nova chave</div>
+                    <!-- Gemini API Key Section -->
+                    <div class="key-section-title">Adicionar nova chave do Gemini</div>
                     <div class="key-form">
                         <div class="key-form-row">
                             <input type="text" id="keyLabel" placeholder="Nome (ex: Pessoal, Trabalho)" style="max-width:160px">
@@ -1034,8 +1035,23 @@ HTML_PAGE = r"""<!DOCTYPE html>
                         <div class="key-status" id="keyStatus" style="display:none"></div>
                     </div>
                     <div class="key-section-title">Chaves salvas</div>
-                    <div class="key-list" id="keyList">
+                    <div class="key-list" id="keyList" style="margin-bottom:24px">
                         <div style="color:var(--text-dim);font-size:13px;padding:8px 0">Nenhuma chave salva ainda.</div>
+                    </div>
+
+                    <!-- Gemini Model Section -->
+                    <div class="key-section-title" style="margin-top:24px;border-top:1px solid var(--border);padding-top:16px">Modelo Gemini Ativo</div>
+                    <div class="key-form" style="margin-bottom:12px">
+                        <div class="key-form-row">
+                            <select id="modelSelect" onchange="changeActiveModel()" class="limit-select" style="width:100%; padding:10px 14px; background:var(--bg-primary); border-radius:var(--radius-sm); border:1px solid var(--border); color:var(--text-primary); outline:none; font-size:13px; cursor:pointer;">
+                                <option value="gemini-2.5-flash">Gemini 2.5 Flash (Rápido, leve e padrão)</option>
+                                <option value="gemini-2.5-pro">Gemini 2.5 Pro (Raciocínio complexo, inteligente)</option>
+                                <option value="gemini-2.0-flash">Gemini 2.0 Flash (Altamente responsivo, legado)</option>
+                                <option value="gemini-1.5-flash">Gemini 1.5 Flash (Fidelidade padrão)</option>
+                                <option value="gemini-1.5-pro">Gemini 1.5 Pro (Fidelidade complexa)</option>
+                            </select>
+                        </div>
+                        <div class="key-status" id="modelStatus" style="display:none"></div>
                     </div>
                 </div>
             </div>
@@ -1291,6 +1307,7 @@ HTML_PAGE = r"""<!DOCTYPE html>
         function openSettings() {
             document.getElementById('settingsModal').classList.add('visible');
             loadKeys();
+            loadActiveModel();
         }
 
         function closeSettings() {
@@ -1407,6 +1424,48 @@ HTML_PAGE = r"""<!DOCTYPE html>
             } catch (e) {
                 showKeyStatus('Erro: ' + e.message, 'error');
             }
+        }
+
+        async function loadActiveModel() {
+            try {
+                const resp = await fetch('/api/model');
+                const data = await resp.json();
+                if (data.active_model) {
+                    document.getElementById('modelSelect').value = data.active_model;
+                }
+            } catch (e) {
+                console.error('Erro ao carregar modelo ativo:', e);
+            }
+        }
+
+        async function changeActiveModel() {
+            const select = document.getElementById('modelSelect');
+            const model = select.value;
+            const statusEl = document.getElementById('modelStatus');
+            
+            statusEl.textContent = 'Atualizando modelo...';
+            statusEl.className = 'key-status info';
+            statusEl.style.display = 'block';
+            
+            try {
+                const resp = await fetch('/api/model', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ model })
+                });
+                const data = await resp.json();
+                if (data.ok) {
+                    statusEl.textContent = data.mensagem;
+                    statusEl.className = 'key-status success';
+                } else {
+                    statusEl.textContent = 'Erro: ' + data.erro;
+                    statusEl.className = 'key-status error';
+                }
+            } catch (e) {
+                statusEl.textContent = 'Erro ao salvar: ' + e.message;
+                statusEl.className = 'key-status error';
+            }
+            setTimeout(() => { statusEl.style.display = 'none'; }, 4000);
         }
 
         const activeSummaries = {};

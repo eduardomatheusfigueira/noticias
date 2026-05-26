@@ -14,6 +14,18 @@ load_dotenv(_project_root / ".env")
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
 GEMINI_MODEL = "gemini-2.5-flash"
 
+def get_active_model() -> str:
+    """Tenta carregar o modelo ativo das configurações (api_keys.json)."""
+    try:
+        import json
+        keys_file = Path(__file__).parent.parent / "api_keys.json"
+        if keys_file.exists():
+            data = json.loads(keys_file.read_text(encoding="utf-8"))
+            return data.get("active_model", "gemini-2.5-flash")
+    except Exception:
+        pass
+    return "gemini-2.5-flash"
+
 # ── Caminhos ──────────────────────────────────────────────────────────────────
 PROJECT_ROOT = _project_root
 CSV_PATH = _project_root / "Principais noticiarios do mundo - Noticiários gerais.csv"
