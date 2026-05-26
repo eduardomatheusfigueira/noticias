@@ -2,7 +2,7 @@
 
 Uma ferramenta completa em Python para agregar, traduzir e classificar notícias de **97 fontes globais** de informação. O projeto conta com uma interface de linha de comando (CLI) rica e uma interface Web moderna, responsiva e otimizada (Dark Mode) baseada em Flask.
 
-Todas as notícias são traduzidas em tempo real para o **Português Brasileiro** através da API do Gemini (`gemini-2.5-flash`).
+Todas as notícias são traduzidas em tempo real para o **Português Brasileiro** através da API do Gemini (suportando a família de modelos Gemini 3.5, 3.1, 2.5, 2.0 e 1.5).
 
 ---
 
@@ -15,6 +15,12 @@ Todas as notícias são traduzidas em tempo real para o **Português Brasileiro*
   1. **RSS Reader**: Busca rápida e estruturada de feeds RSS/Atom.
   2. **Scraper Genérico por Heurísticas**: Extração inteligente da estrutura de homepages usando heurísticas avançadas de tags e classes HTML para fontes sem RSS.
   3. **LLM Fallback**: Extração via Gemini para portais que utilizam sistemas anti-bot avançados ou estruturas de página exóticas.
+* **Ações Individuais em Notícias**:
+  * **"Ler no Site"**: Abre diretamente a matéria de interesse no veículo jornalístico original.
+  * **"Resumir com IA"**: Realiza o scraping dinâmico do conteúdo integral do artigo (limpando paywalls e anúncios) ou usa metadados para produzir um resumo customizado em português brasileiro.
+* **Gerenciador Dinâmico de API Keys & Modelos**:
+  * Painel de controle no aplicativo para cadastrar, listar (com máscara), testar validade e ativar múltiplas chaves API do Gemini.
+  * Seleção dinâmica entre múltiplos modelos do Gemini (3.5 Flash, 3.1 Pro Preview, 3 Flash Preview, 3.1 Flash-Lite, 2.5 Flash/Pro, 2.0 Flash e gerações anteriores 1.5).
 * **4 Modos de Classificação**:
   * `manchetes`: A ordem exata de destaque da capa editorial do veículo.
   * `recentes`: Organização cronológica descendente baseada no timestamp de publicação.
@@ -29,8 +35,8 @@ Todas as notícias são traduzidas em tempo real para o **Português Brasileiro*
 * **Interface Web**: Flask (HTML5, Vanilla CSS, Modern JS, Dark Theme nativo)
 * **Interface CLI**: `rich` (Saída colorida e tabelas formatadas)
 * **Parsing & Scraping**: `feedparser`, `beautifulsoup4`, `lxml`, `requests`
-* **Inteligência Artificial**: `google-genai` (utilizando o modelo `gemini-2.5-flash`)
-* **Gerenciamento de Ambiente**: `python-dotenv`
+* **Inteligência Artificial**: `google-genai` (suportando a família Gemini 3.5, 3.1, 3.0, 2.5, 2.0 e 1.5)
+* **Gerenciamento de Ambiente e Configuração**: `python-dotenv` e armazenamento dinâmico local (`api_keys.json`)
 
 ---
 
@@ -111,6 +117,9 @@ Por padrão, o servidor estará rodando em:
 * **Barra Lateral Interativa**: Filtro de veículos por busca textual rápida e seleção direta de países.
 * **Seletor de Modos**: Abas superiores rápidas para mudar dinamicamente entre Manchetes, Recentes, Top e Resumo Inteligente.
 * **Grade de Cards**: Visualização limpa dos artigos, com títulos em destaque, leads explicativos, tags de país/idioma e links diretos para a fonte original.
+* **Resumos On-Demand**: Botão "Resumir com IA" para gerar na hora o resumo de qualquer matéria de interesse, buscando o texto integral do artigo sempre que possível.
+* **Configurações Rápidas ("Chaves & Modelos")**: Modal no canto inferior esquerdo para testar, gerenciar e ativar chaves de API e alternar entre modelos do Gemini dinamicamente de forma síncrona.
+* **Resiliência e Mensagens Claras**: Lógica de auto-retry com backoff exponencial contra limites de taxa (HTTP 429) e interceptação de chaves inválidas fornecendo instruções de correção na UI.
 
 ---
 
