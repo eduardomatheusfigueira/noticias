@@ -172,6 +172,28 @@ def api_keys_test():
         return jsonify({"ok": False, "erro": str(e)[:200]})
 
 
+@app.route("/api/model", methods=["GET"])
+def api_get_model():
+    """Retorna o modelo Gemini ativo configurado."""
+    data = _load_api_keys()
+    active_model = data.get("active_model", "gemini-2.5-flash")
+    return jsonify({"active_model": active_model})
+
+
+@app.route("/api/model", methods=["POST"])
+def api_post_model():
+    """Salva a escolha do modelo Gemini ativo."""
+    body = request.get_json() or {}
+    model = body.get("model", "").strip()
+    if not model:
+        return jsonify({"erro": "Parâmetro 'model' é obrigatório."}), 400
+
+    data = _load_api_keys()
+    data["active_model"] = model
+    _save_api_keys(data)
+    return jsonify({"ok": True, "mensagem": f"Modelo ativo alterado para '{model}' com sucesso."})
+
+
 @app.route("/api/resumir-artigo", methods=["POST"])
 def api_resumir_artigo():
     """Gera um resumo da matéria (via URL ou dados de título/lead) via Gemini."""
@@ -186,7 +208,7 @@ def api_resumir_artigo():
     # 1. Carregar a API key ativa
     data_keys = _load_api_keys()
     key = data_keys.get("active", "")
-    from news.config import GEMINI_API_KEY, GEMINI_MODEL
+    from news.config import GEMINI_API_KEY, get_active_model
     active_key = None
     if key:
         for entry in data_keys.get("keys", []):
@@ -252,7 +274,7 @@ Link: {url}
         for attempt in range(3):
             try:
                 response = client.models.generate_content(
-                    model=GEMINI_MODEL,
+                    model=get_active_model(),
                     contents=prompt,
                 )
                 return jsonify({
@@ -1044,11 +1066,18 @@ HTML_PAGE = r"""<!DOCTYPE html>
                     <div class="key-form" style="margin-bottom:12px">
                         <div class="key-form-row">
                             <select id="modelSelect" onchange="changeActiveModel()" class="limit-select" style="width:100%; padding:10px 14px; background:var(--bg-primary); border-radius:var(--radius-sm); border:1px solid var(--border); color:var(--text-primary); outline:none; font-size:13px; cursor:pointer;">
-                                <option value="gemini-2.5-flash">Gemini 2.5 Flash (Rápido, leve e padrão)</option>
-                                <option value="gemini-2.5-pro">Gemini 2.5 Pro (Raciocínio complexo, inteligente)</option>
-                                <option value="gemini-2.0-flash">Gemini 2.0 Flash (Altamente responsivo, legado)</option>
-                                <option value="gemini-1.5-flash">Gemini 1.5 Flash (Fidelidade padrão)</option>
-                                <option value="gemini-1.5-pro">Gemini 1.5 Pro (Fidelidade complexa)</option>
+                                <option value="gemini-3.5-flash">Gemini 3.5 Flash (Estável)</option>
+                                <option value="gemini-3.1-pro-preview">Gemini 3.1 Pro (Preview)</option>
+                                <option value="gemini-3-flash-preview">Gemini 3 Flash (Preview)</option>
+                                <option value="gemini-3.1-flash-lite">Gemini 3.1 Flash-Lite (Estável)</option>
+                                <option value="gemini-3.1-flash-lite-preview">Gemini 3.1 Flash-Lite (Preview)</option>
+                                <option value="gemini-3.1-flash-live-preview">Gemini 3.1 Flash Live (Preview)</option>
+                                <option value="gemini-3.1-flash-tts-preview">Gemini 3.1 Flash TTS (Preview)</option>
+                                <option value="gemini-2.5-flash">Gemini 2.5 Flash (Estável)</option>
+                                <option value="gemini-2.5-pro">Gemini 2.5 Pro (Estável)</option>
+                                <option value="gemini-2.0-flash">Gemini 2.0 Flash (Estável)</option>
+                                <option value="gemini-1.5-flash">Gemini 1.5 Flash</option>
+                                <option value="gemini-1.5-pro">Gemini 1.5 Pro</option>
                             </select>
                         </div>
                         <div class="key-status" id="modelStatus" style="display:none"></div>
