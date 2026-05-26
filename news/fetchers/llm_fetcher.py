@@ -17,6 +17,8 @@ _EXTRACT_PROMPT = """Você é um assistente que extrai manchetes de páginas de 
 Dado o texto abaixo (extraído da homepage de "{source_name}" — {source_country}), 
 extraia as {limit} principais manchetes/notícias.
 
+As URLs das matérias correspondentes às manchetes estão indicadas no texto no formato `[URL: <link>]` (ex: `Título da Notícia [URL: http://...]`). Extraia essa URL com precisão para o campo "link", e certifique-se de que o campo "titulo" contenha apenas o título limpo, sem a marcação "[URL: ...]".
+
 Para cada notícia, retorne em JSON:
 - "titulo": título da notícia (no idioma original)
 - "lead": breve descrição em 1-2 frases (se disponível, senão string vazia)
@@ -134,6 +136,17 @@ class LLMFetcher(BaseFetcher):
                 return None
 
             soup = BeautifulSoup(resp.text, "lxml")
+
+            # Embutir URLs absolutas nos elementos <a> antes de extrair texto
+            from urllib.parse import urljoin
+            for a in soup.find_all("a", href=True):
+                href = a["href"].strip()
+                if href and not href.startswith("javascript:") and not href.startswith("#"):
+                    abs_url = urljoin(url, href)
+                    link_text = a.get_text().strip()
+                    if link_text and len(link_text) > 8:
+                        # Append a text token inside the link tag
+                        a.append(f" [URL: {abs_url}]")
 
             # Remover scripts, styles
             for tag in soup.find_all(["script", "style", "noscript", "iframe"]):
