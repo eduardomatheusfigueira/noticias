@@ -31,10 +31,27 @@ class Classifier:
     def _get_gemini(self):
         """Inicializa cliente Gemini sob demanda."""
         if self._gemini_client is None:
-            if not GEMINI_API_KEY:
+            key = self._load_active_key() or GEMINI_API_KEY
+            if not key:
                 raise ValueError("GEMINI_API_KEY necessária para o modo 'resumo'.")
-            self._gemini_client = genai.Client(api_key=GEMINI_API_KEY)
+            self._gemini_client = genai.Client(api_key=key)
         return self._gemini_client
+
+    @staticmethod
+    def _load_active_key() -> str | None:
+        """Tenta carregar a chave ativa do gerenciador de API keys."""
+        try:
+            from pathlib import Path
+            keys_file = Path(__file__).parent.parent / "api_keys.json"
+            if keys_file.exists():
+                data = json.loads(keys_file.read_text(encoding="utf-8"))
+                active = data.get("active", "")
+                for entry in data.get("keys", []):
+                    if entry.get("label") == active:
+                        return entry.get("key", "")
+        except Exception:
+            pass
+        return None
 
     def classificar(self, itens: list[NewsItem], modo: str, 
                      source_name: str = "", source_country: str = "",

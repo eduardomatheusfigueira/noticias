@@ -11,6 +11,9 @@ try:
 except Exception:
     pass
 
+import json
+from pathlib import Path
+
 from flask import Flask, jsonify, request
 from datetime import datetime
 
@@ -26,6 +29,27 @@ app = Flask(__name__)
 registry = SourceRegistry()
 translator = Translator()
 classifier = Classifier()
+
+API_KEYS_FILE = Path(__file__).parent / "api_keys.json"
+
+
+def _load_api_keys():
+    if API_KEYS_FILE.exists():
+        return json.loads(API_KEYS_FILE.read_text(encoding="utf-8"))
+    return {"keys": [], "active": ""}
+
+
+def _save_api_keys(data):
+    API_KEYS_FILE.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+def _reload_modules_with_key(api_key: str):
+    """Recarrega translator e classifier com a nova API key."""
+    global translator, classifier
+    translator.reload_key(api_key)
+    # Classifier usa genai sob demanda, recarregar
+    from google import genai
+    classifier._gemini_client = genai.Client(api_key=api_key)
 
 
 def _get_fetcher(estrategia: str):
@@ -52,6 +76,100 @@ def _fetch_with_fallback(source: Source, limit: int) -> FetchResult:
         if result.sucesso:
             return result
     return result
+
+
+# ── API Keys Management ───────────────────────────────────────────────────────
+
+@app.route("/api/keys", methods=["GET"])
+def api_keys_list():
+    """Retorna lista de API keys salvas (mascaradas)."""
+    data = _load_api_keys()
+    masked = []
+    for entry in data.get("keys", []):
+        key = entry.get("key", "")
+        masked_key = key[:8] + "..." + key[-4:] if len(key) > 12 else "****"
+        masked.append({
+            "label": entry.get("label", ""),
+            "key_masked": masked_key,
+            "is_active": entry.get("label") == data.get("active", ""),
+        })
+    return jsonify({"keys": masked, "active": data.get("active", "")})
+
+
+@app.route("/api/keys", methods=["POST"])
+def api_keys_add():
+    """Adiciona uma nova API key."""
+    body = request.get_json()
+    label = body.get("label", "").strip()
+    key = body.get("key", "").strip()
+    if not label or not key:
+        return jsonify({"erro": "Label e key são obrigatórios."}), 400
+
+    data = _load_api_keys()
+    # Verificar duplicata
+    for entry in data["keys"]:
+        if entry["label"] == label:
+            return jsonify({"erro": f"Já existe uma key com o label '{label}'."}), 409
+
+    data["keys"].append({"label": label, "key": key})
+    # Se é a primeira, ativar automaticamente
+    if not data["active"]:
+        data["active"] = label
+        _reload_modules_with_key(key)
+    _save_api_keys(data)
+    return jsonify({"ok": True, "mensagem": f"Key '{label}' adicionada."})
+
+
+@app.route("/api/keys/<label>", methods=["DELETE"])
+def api_keys_delete(label):
+    """Remove uma API key."""
+    data = _load_api_keys()
+    data["keys"] = [e for e in data["keys"] if e["label"] != label]
+    if data["active"] == label:
+        data["active"] = data["keys"][0]["label"] if data["keys"] else ""
+        if data["active"]:
+            for e in data["keys"]:
+                if e["label"] == data["active"]:
+                    _reload_modules_with_key(e["key"])
+                    break
+    _save_api_keys(data)
+    return jsonify({"ok": True})
+
+
+@app.route("/api/keys/activate", methods=["POST"])
+def api_keys_activate():
+    """Define uma API key como ativa."""
+    body = request.get_json()
+    label = body.get("label", "").strip()
+    data = _load_api_keys()
+    found = None
+    for entry in data["keys"]:
+        if entry["label"] == label:
+            found = entry
+            break
+    if not found:
+        return jsonify({"erro": f"Key '{label}' não encontrada."}), 404
+
+    data["active"] = label
+    _save_api_keys(data)
+    _reload_modules_with_key(found["key"])
+    return jsonify({"ok": True, "mensagem": f"Key '{label}' ativada."})
+
+
+@app.route("/api/keys/test", methods=["POST"])
+def api_keys_test():
+    """Testa se uma API key é válida."""
+    body = request.get_json()
+    key = body.get("key", "").strip()
+    if not key:
+        return jsonify({"erro": "Key é obrigatória."}), 400
+    try:
+        from google import genai
+        client = genai.Client(api_key=key)
+        resp = client.models.generate_content(model="gemini-2.5-flash", contents="Diga apenas: OK")
+        return jsonify({"ok": True, "mensagem": "Key válida!", "resposta": resp.text.strip()[:50]})
+    except Exception as e:
+        return jsonify({"ok": False, "erro": str(e)[:200]})
 
 
 # ── API Endpoints ─────────────────────────────────────────────────────────────
@@ -555,6 +673,132 @@ HTML_PAGE = r"""<!DOCTYPE html>
             font-size: 14px;
         }
 
+        /* ── Settings Button ────────────────── */
+        .settings-btn {
+            width: 100%;
+            padding: 12px 16px;
+            border: none;
+            border-top: 1px solid var(--border);
+            background: transparent;
+            color: var(--text-secondary);
+            font-family: inherit;
+            font-size: 13px;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            transition: all 0.15s;
+        }
+        .settings-btn:hover { background: var(--bg-hover); color: var(--text-primary); }
+        .settings-icon { font-size: 16px; }
+
+        /* ── Modal ──────────────────────────── */
+        .modal-overlay {
+            display: none;
+            position: fixed;
+            inset: 0;
+            background: rgba(0,0,0,0.6);
+            backdrop-filter: blur(4px);
+            z-index: 1000;
+            align-items: center;
+            justify-content: center;
+        }
+        .modal-overlay.visible { display: flex; }
+
+        .modal {
+            background: var(--bg-secondary);
+            border: 1px solid var(--border);
+            border-radius: var(--radius);
+            width: 520px;
+            max-width: 95vw;
+            max-height: 85vh;
+            overflow-y: auto;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.5);
+        }
+
+        .modal-header {
+            padding: 20px 24px;
+            border-bottom: 1px solid var(--border);
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+        .modal-header h3 { font-size: 16px; font-weight: 600; }
+        .modal-close {
+            background: none; border: none; color: var(--text-dim);
+            font-size: 20px; cursor: pointer; padding: 4px;
+        }
+        .modal-close:hover { color: var(--text-primary); }
+
+        .modal-body { padding: 20px 24px; }
+
+        .key-form { display: flex; flex-direction: column; gap: 10px; margin-bottom: 20px; }
+        .key-form-row { display: flex; gap: 8px; }
+        .key-form input {
+            flex: 1; padding: 10px 14px;
+            border-radius: var(--radius-sm);
+            border: 1px solid var(--border);
+            background: var(--bg-primary);
+            color: var(--text-primary);
+            font-family: inherit; font-size: 13px; outline: none;
+        }
+        .key-form input:focus { border-color: var(--accent-blue); }
+        .key-form input::placeholder { color: var(--text-dim); }
+
+        .btn {
+            padding: 10px 18px;
+            border-radius: var(--radius-sm);
+            border: none;
+            font-family: inherit;
+            font-size: 13px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.15s;
+            flex-shrink: 0;
+        }
+        .btn-primary { background: var(--accent-blue); color: white; }
+        .btn-primary:hover { filter: brightness(1.1); }
+        .btn-outline {
+            background: transparent;
+            border: 1px solid var(--border);
+            color: var(--text-secondary);
+        }
+        .btn-outline:hover { border-color: var(--accent-blue); color: var(--text-primary); }
+        .btn-danger { background: rgba(248,113,113,0.15); color: var(--accent-red); }
+        .btn-danger:hover { background: rgba(248,113,113,0.25); }
+        .btn-success { background: rgba(52,211,153,0.15); color: var(--accent-green); }
+
+        .key-list { display: flex; flex-direction: column; gap: 6px; }
+        .key-entry {
+            display: flex; align-items: center; gap: 10px;
+            padding: 12px 14px;
+            background: var(--bg-primary);
+            border-radius: var(--radius-sm);
+            border: 1px solid var(--border);
+        }
+        .key-entry.active { border-color: var(--accent-green); }
+        .key-label { font-weight: 500; font-size: 13px; }
+        .key-masked { font-size: 12px; color: var(--text-dim); font-family: monospace; }
+        .key-actions { margin-left: auto; display: flex; gap: 6px; }
+        .key-active-badge {
+            font-size: 10px; padding: 2px 8px;
+            border-radius: 10px; font-weight: 600;
+            background: rgba(52,211,153,0.15); color: var(--accent-green);
+        }
+        .key-status { font-size: 12px; margin-top: 8px; padding: 8px 12px; border-radius: var(--radius-sm); }
+        .key-status.success { background: rgba(52,211,153,0.1); color: var(--accent-green); }
+        .key-status.error { background: rgba(248,113,113,0.1); color: var(--accent-red); }
+        .key-status.info { background: rgba(79,140,255,0.1); color: var(--accent-blue); }
+
+        .key-section-title {
+            font-size: 12px;
+            font-weight: 600;
+            color: var(--text-dim);
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            margin-bottom: 8px;
+        }
+
         /* ── Responsive ─────────────────────── */
         @media (max-width: 768px) {
             .app { grid-template-columns: 1fr; }
@@ -580,7 +824,38 @@ HTML_PAGE = r"""<!DOCTYPE html>
                 </select>
             </div>
             <div class="source-list" id="sourceList"></div>
+            <button class="settings-btn" onclick="openSettings()">
+                <span class="settings-icon">&#9881;</span> Configuracoes de API Keys
+            </button>
         </aside>
+
+        <!-- Settings Modal -->
+        <div class="modal-overlay" id="settingsModal">
+            <div class="modal">
+                <div class="modal-header">
+                    <h3>&#128273; Gerenciar API Keys do Gemini</h3>
+                    <button class="modal-close" onclick="closeSettings()">&times;</button>
+                </div>
+                <div class="modal-body">
+                    <div class="key-section-title">Adicionar nova chave</div>
+                    <div class="key-form">
+                        <div class="key-form-row">
+                            <input type="text" id="keyLabel" placeholder="Nome (ex: Pessoal, Trabalho)" style="max-width:160px">
+                            <input type="text" id="keyValue" placeholder="Cole a API Key aqui...">
+                        </div>
+                        <div class="key-form-row">
+                            <button class="btn btn-outline" onclick="testKey()">Testar</button>
+                            <button class="btn btn-primary" onclick="addKey()">Salvar</button>
+                        </div>
+                        <div class="key-status" id="keyStatus" style="display:none"></div>
+                    </div>
+                    <div class="key-section-title">Chaves salvas</div>
+                    <div class="key-list" id="keyList">
+                        <div style="color:var(--text-dim);font-size:13px;padding:8px 0">Nenhuma chave salva ainda.</div>
+                    </div>
+                </div>
+            </div>
+        </div>
 
         <!-- Main -->
         <main class="main">
@@ -802,6 +1077,128 @@ HTML_PAGE = r"""<!DOCTYPE html>
             document.getElementById("limitSelect").addEventListener("change", () => {
                 if (currentSource) fetchNews(currentSource);
             });
+        }
+
+        // ── Settings / API Keys ──────────────────────────────────────────────
+        function openSettings() {
+            document.getElementById('settingsModal').classList.add('visible');
+            loadKeys();
+        }
+
+        function closeSettings() {
+            document.getElementById('settingsModal').classList.remove('visible');
+        }
+
+        // Fechar modal ao clicar fora
+        document.getElementById('settingsModal').addEventListener('click', (e) => {
+            if (e.target.classList.contains('modal-overlay')) closeSettings();
+        });
+
+        async function loadKeys() {
+            try {
+                const resp = await fetch('/api/keys');
+                const data = await resp.json();
+                renderKeys(data);
+            } catch (e) {
+                console.error('Erro ao carregar keys:', e);
+            }
+        }
+
+        function renderKeys(data) {
+            const list = document.getElementById('keyList');
+            if (!data.keys || data.keys.length === 0) {
+                list.innerHTML = '<div style="color:var(--text-dim);font-size:13px;padding:8px 0">Nenhuma chave salva ainda.</div>';
+                return;
+            }
+            list.innerHTML = data.keys.map(k => `
+                <div class="key-entry${k.is_active ? ' active' : ''}">
+                    <div>
+                        <div class="key-label">${k.label}</div>
+                        <div class="key-masked">${k.key_masked}</div>
+                    </div>
+                    ${k.is_active ? '<span class="key-active-badge">Ativa</span>' : ''}
+                    <div class="key-actions">
+                        ${!k.is_active ? `<button class="btn btn-success" onclick="activateKey('${k.label}')" style="padding:6px 12px;font-size:12px">Ativar</button>` : ''}
+                        <button class="btn btn-danger" onclick="deleteKey('${k.label}')" style="padding:6px 12px;font-size:12px">Remover</button>
+                    </div>
+                </div>
+            `).join('');
+        }
+
+        function showKeyStatus(msg, type) {
+            const el = document.getElementById('keyStatus');
+            el.textContent = msg;
+            el.className = 'key-status ' + type;
+            el.style.display = 'block';
+            setTimeout(() => { el.style.display = 'none'; }, 5000);
+        }
+
+        async function testKey() {
+            const key = document.getElementById('keyValue').value.trim();
+            if (!key) { showKeyStatus('Cole uma API key primeiro.', 'error'); return; }
+            showKeyStatus('Testando...', 'info');
+            try {
+                const resp = await fetch('/api/keys/test', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ key }),
+                });
+                const data = await resp.json();
+                if (data.ok) {
+                    showKeyStatus('Key valida! Resposta: ' + data.resposta, 'success');
+                } else {
+                    showKeyStatus('Key invalida: ' + data.erro, 'error');
+                }
+            } catch (e) {
+                showKeyStatus('Erro ao testar: ' + e.message, 'error');
+            }
+        }
+
+        async function addKey() {
+            const label = document.getElementById('keyLabel').value.trim();
+            const key = document.getElementById('keyValue').value.trim();
+            if (!label || !key) { showKeyStatus('Preencha o nome e a key.', 'error'); return; }
+            try {
+                const resp = await fetch('/api/keys', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ label, key }),
+                });
+                const data = await resp.json();
+                if (data.erro) { showKeyStatus(data.erro, 'error'); return; }
+                showKeyStatus(data.mensagem, 'success');
+                document.getElementById('keyLabel').value = '';
+                document.getElementById('keyValue').value = '';
+                loadKeys();
+            } catch (e) {
+                showKeyStatus('Erro: ' + e.message, 'error');
+            }
+        }
+
+        async function activateKey(label) {
+            try {
+                const resp = await fetch('/api/keys/activate', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ label }),
+                });
+                const data = await resp.json();
+                if (data.erro) { showKeyStatus(data.erro, 'error'); return; }
+                showKeyStatus('Key ativada: ' + label, 'success');
+                loadKeys();
+            } catch (e) {
+                showKeyStatus('Erro: ' + e.message, 'error');
+            }
+        }
+
+        async function deleteKey(label) {
+            if (!confirm('Remover a key "' + label + '"?')) return;
+            try {
+                await fetch('/api/keys/' + encodeURIComponent(label), { method: 'DELETE' });
+                loadKeys();
+            } catch (e) {
+                showKeyStatus('Erro: ' + e.message, 'error');
+            }
         }
 
         init();

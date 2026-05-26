@@ -5,6 +5,7 @@ env/
 
 # Configurações/Segurança
 .env
+api_keys.json
 
 # Cache do Python
 __pycache__/
@@ -21,3 +22,5 @@ debug_llm.py
 # Arquivos de IDE
 .vscode/
 .idea/
+scratch/
+

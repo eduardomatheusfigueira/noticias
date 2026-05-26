@@ -34,9 +34,26 @@ class LLMFetcher(BaseFetcher):
     """Usa Gemini para extrair manchetes de páginas de notícias."""
 
     def __init__(self):
-        if not GEMINI_API_KEY:
-            raise ValueError("GEMINI_API_KEY não configurada. Verifique o arquivo .env")
-        self._client = genai.Client(api_key=GEMINI_API_KEY)
+        key = self._load_active_key() or GEMINI_API_KEY
+        if not key:
+            raise ValueError("GEMINI_API_KEY não configurada. Verifique o arquivo .env ou adicione uma chave no painel de configurações.")
+        self._client = genai.Client(api_key=key)
+
+    @staticmethod
+    def _load_active_key() -> str | None:
+        """Tenta carregar a chave ativa do gerenciador de API keys."""
+        try:
+            from pathlib import Path
+            keys_file = Path(__file__).parent.parent.parent / "api_keys.json"
+            if keys_file.exists():
+                data = json.loads(keys_file.read_text(encoding="utf-8"))
+                active = data.get("active", "")
+                for entry in data.get("keys", []):
+                    if entry.get("label") == active:
+                        return entry.get("key", "")
+        except Exception:
+            pass
+        return None
 
     # URLs alternativas para sites cujo domínio principal não funciona bem
     _ALT_URLS = {
@@ -48,6 +65,7 @@ class LLMFetcher(BaseFetcher):
         "mainichi.jp": "https://mainichi.jp/english/",
         "kompas.com": "https://english.kompas.com/",
         "ahram.org.eg": "https://english.ahram.org.eg/",
+        "kayhan.ir": "https://kayhan.london/",
     }
 
     def _get_url(self, source: Source) -> str:
