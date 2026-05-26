@@ -1,0 +1,23 @@
+# Ambiente Virtual
+venv/
+.venv/
+env/
+
+# Configurações/Segurança
+.env
+
+# Cache do Python
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Arquivos temporários e diagnósticos anteriores
+diagnostico_fontes.py
+diagnostico_relatorio.md
+diagnostico_resultado.csv
+gerar_relatorio.py
+debug_llm.py
+
+# Arquivos de IDE
+.vscode/
+.idea/
