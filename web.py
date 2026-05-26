@@ -172,6 +172,108 @@ def api_keys_test():
         return jsonify({"ok": False, "erro": str(e)[:200]})
 
 
+@app.route("/api/resumir-artigo", methods=["POST"])
+def api_resumir_artigo():
+    """Gera um resumo da matéria (via URL ou dados de título/lead) via Gemini."""
+    body = request.get_json() or {}
+    url = body.get("url", "").strip()
+    titulo = body.get("titulo", "").strip()
+    lead = body.get("lead", "").strip()
+
+    if not url and not titulo:
+        return jsonify({"erro": "Parâmetro 'url' ou 'titulo' é obrigatório."}), 400
+
+    # 1. Carregar a API key ativa
+    data_keys = _load_api_keys()
+    key = data_keys.get("active", "")
+    from news.config import GEMINI_API_KEY, GEMINI_MODEL
+    active_key = None
+    if key:
+        for entry in data_keys.get("keys", []):
+            if entry.get("label") == key:
+                active_key = entry.get("key", "")
+                break
+    api_key_to_use = active_key or GEMINI_API_KEY
+
+    if not api_key_to_use:
+        return jsonify({"erro": "Nenhuma Gemini API Key configurada. Salve uma chave nas configurações."}), 400
+
+    # 2. Tentar extrair o conteúdo do artigo se a URL estiver disponível
+    artigo_texto = ""
+    if url and url != "#":
+        try:
+            import requests
+            from bs4 import BeautifulSoup
+            from news.config import HTTP_HEADERS, HTTP_TIMEOUT
+
+            resp = requests.get(url, headers=HTTP_HEADERS, timeout=HTTP_TIMEOUT)
+            if resp.status_code == 200:
+                soup = BeautifulSoup(resp.text, "html.parser")
+                paragraphs = soup.find_all("p")
+                text_blocks = []
+                for p in paragraphs:
+                    text = p.get_text().strip()
+                    if len(text) > 40 and not any(x in text.lower() for x in ["cookies", "política", "termos de uso", "inscreva-se", "newsletter", "todos os direitos"]):
+                        text_blocks.append(text)
+                artigo_texto = "\n\n".join(text_blocks[:15])
+        except Exception as e:
+            print(f"[Artigo] Erro ao extrair texto do link {url}: {e}")
+
+    # 3. Construir o prompt para o Gemini
+    if artigo_texto and len(artigo_texto) > 300:
+        prompt = f"""Você é um assistente de jornalismo altamente qualificado. 
+Escreva um resumo conciso, envolvente e informativo de 2 a 3 parágrafos do artigo abaixo. 
+O resumo deve estar inteiramente em português brasileiro, mantendo um tom neutro e jornalístico. 
+Não invente fatos adicionais e não inclua saudações ou metadados de sistema.
+
+CONTEÚDO DO ARTIGO:
+Título original: {titulo}
+Link original: {url}
+
+{artigo_texto}
+"""
+    else:
+        prompt = f"""Você é um assistente de jornalismo. 
+Com base no título e descrição preliminar de uma notícia, escreva um parágrafo de resumo explicativo em português brasileiro.
+Mantenha um tom profissional e jornalístico. Se a notícia original for em outro idioma, traduza os conceitos com precisão.
+
+DADOS DA NOTÍCIA:
+Título: {titulo}
+Descrição/Lead: {lead}
+Link: {url}
+"""
+
+    # 4. Chamar o Gemini
+    try:
+        from google import genai
+        client = genai.Client(api_key=api_key_to_use)
+        
+        last_error = None
+        for attempt in range(3):
+            try:
+                response = client.models.generate_content(
+                    model=GEMINI_MODEL,
+                    contents=prompt,
+                )
+                return jsonify({
+                    "sucesso": True,
+                    "resumo": response.text.strip(),
+                    "usou_artigo_completo": bool(artigo_texto and len(artigo_texto) > 300)
+                })
+            except Exception as ex:
+                last_error = ex
+                if "429" in str(ex) or "RESOURCE_EXHAUSTED" in str(ex):
+                    import time
+                    time.sleep(2 * (attempt + 1))
+                    continue
+                else:
+                    break
+        return jsonify({"erro": f"Erro na chamada do Gemini: {last_error}"}), 500
+
+    except Exception as e:
+        return jsonify({"erro": f"Erro interno ao gerar o resumo: {e}"}), 500
+
+
 # ── API Endpoints ─────────────────────────────────────────────────────────────
 
 @app.route("/api/fontes")
@@ -612,16 +714,12 @@ HTML_PAGE = r"""<!DOCTYPE html>
             border-radius: var(--radius);
             border: 1px solid var(--border);
             transition: all 0.2s;
-            cursor: pointer;
-            text-decoration: none;
             color: inherit;
             display: block;
         }
 
         .news-item:hover {
-            border-color: var(--accent-blue);
-            transform: translateY(-1px);
-            box-shadow: var(--shadow);
+            border-color: var(--border);
         }
 
         .news-number {
@@ -646,10 +744,96 @@ HTML_PAGE = r"""<!DOCTYPE html>
         }
 
         .news-footer {
-            font-size: 12px;
-            color: var(--text-dim);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            width: 100%;
+            margin-top: 12px;
+        }
+
+        .news-footer-left {
             display: flex;
             gap: 12px;
+            font-size: 12px;
+            color: var(--text-dim);
+        }
+
+        .news-footer-right {
+            display: flex;
+            gap: 8px;
+        }
+
+        .card-btn {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            padding: 6px 12px;
+            border-radius: var(--radius-sm);
+            font-size: 12px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.2s;
+            text-decoration: none;
+            font-family: inherit;
+            border: 1px solid var(--border);
+        }
+
+        .card-btn-link {
+            background: transparent;
+            color: var(--text-secondary);
+        }
+
+        .card-btn-link:hover {
+            background: var(--bg-hover);
+            color: var(--text-primary);
+            border-color: var(--text-dim);
+        }
+
+        .card-btn-ai {
+            background: linear-gradient(135deg, var(--accent-purple) 0%, var(--accent-blue) 100%);
+            color: white;
+            border: none;
+        }
+
+        .card-btn-ai:hover {
+            opacity: 0.9;
+            transform: translateY(-1px);
+            box-shadow: 0 4px 12px rgba(167, 139, 250, 0.3);
+        }
+
+        /* ── News Summary Box ────────────────── */
+        .news-summary-box {
+            display: none;
+            margin-top: 14px;
+            padding: 16px 20px;
+            background: rgba(167, 139, 250, 0.05);
+            border-left: 3px solid var(--accent-purple);
+            border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+            font-size: 13px;
+            line-height: 1.6;
+            color: var(--text-primary);
+            animation: fadeIn 0.3s ease-out;
+        }
+
+        .news-summary-box.visible {
+            display: block;
+        }
+
+        .news-summary-box .spinner-sm {
+            width: 16px;
+            height: 16px;
+            border: 2px solid var(--border);
+            border-top-color: var(--accent-purple);
+            border-radius: 50%;
+            animation: spin 0.8s linear infinite;
+            display: inline-block;
+            vertical-align: middle;
+            margin-right: 8px;
+        }
+
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(4px); }
+            to { opacity: 1; transform: translateY(0); }
         }
 
         /* ── Resumo ─────────────────────────── */
@@ -1009,18 +1193,42 @@ HTML_PAGE = r"""<!DOCTYPE html>
             }
 
             list.innerHTML = data.itens.map((item, i) => {
-                const link = item.link || "#";
-                const target = item.link ? ' target="_blank" rel="noopener"' : '';
+                const hasLink = item.link && item.link !== "#";
+                let hostname = "";
+                if (hasLink) {
+                    try {
+                        hostname = new URL(item.link).hostname;
+                    } catch (e) {
+                        hostname = "link";
+                    }
+                }
+                const encUrl = encodeURIComponent(item.link || "");
+                const encTitulo = encodeURIComponent(item.titulo || "");
+                const encLead = encodeURIComponent(item.lead || "");
+
                 return `
-                    <a class="news-item" href="${link}"${target}>
+                    <div class="news-item" id="news-item-${i}">
                         <div class="news-number">${String(i + 1).padStart(2, '0')}</div>
                         <div class="news-title">${item.titulo}</div>
-                        ${item.lead ? `<div class="news-lead">${item.lead.substring(0, 250)}</div>` : ''}
+                        ${item.lead ? `<div class="news-lead">${item.lead}</div>` : ''}
                         <div class="news-footer">
-                            ${item.data ? `<span>${item.data}</span>` : ''}
-                            ${item.link ? `<span>${new URL(item.link).hostname}</span>` : ''}
+                            <div class="news-footer-left">
+                                ${item.data ? `<span>${item.data}</span>` : ''}
+                                ${hasLink ? `<span>${hostname}</span>` : ''}
+                            </div>
+                            <div class="news-footer-right">
+                                ${hasLink ? `<a class="card-btn card-btn-link" href="${item.link}" target="_blank" rel="noopener">
+                                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="vertical-align:middle;margin-right:2px"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6M15 3h6v6M10 14L21 3"/></svg>
+                                    Ler no Site
+                                </a>` : ''}
+                                <button class="card-btn card-btn-ai" onclick="toggleSummary(${i}, '${encUrl}', '${encTitulo}', '${encLead}')">
+                                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="vertical-align:middle;margin-right:2px"><path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>
+                                    Resumir com IA
+                                </button>
+                            </div>
                         </div>
-                    </a>
+                        <div class="news-summary-box" id="summary-box-${i}"></div>
+                    </div>
                 `;
             }).join("");
         }
@@ -1198,6 +1406,69 @@ HTML_PAGE = r"""<!DOCTYPE html>
                 loadKeys();
             } catch (e) {
                 showKeyStatus('Erro: ' + e.message, 'error');
+            }
+        }
+
+        const activeSummaries = {};
+
+        async function toggleSummary(index, encodedUrl, encodedTitulo, encodedLead) {
+            const box = document.getElementById(`summary-box-${index}`);
+            if (!box) return;
+
+            // Se já estiver visível, ocultar
+            if (box.classList.contains("visible")) {
+                box.classList.remove("visible");
+                return;
+            }
+
+            // Se já tivermos o resumo carregado, apenas mostrar
+            if (activeSummaries[index]) {
+                box.innerHTML = activeSummaries[index];
+                box.classList.add("visible");
+                return;
+            }
+
+            // Caso contrário, carregar via API
+            const url = decodeURIComponent(encodedUrl);
+            const titulo = decodeURIComponent(encodedTitulo);
+            const lead = decodeURIComponent(encodedLead);
+
+            box.innerHTML = `<span class="spinner-sm"></span> Gerando resumo inteligente com IA...`;
+            box.classList.add("visible");
+
+            try {
+                const resp = await fetch("/api/resumir-artigo", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ url, titulo, lead }),
+                });
+                const data = await resp.json();
+
+                if (data.erro) {
+                    box.innerHTML = `<div style="color:var(--accent-red);font-size:12px;">Erro ao gerar resumo: ${data.erro}</div>`;
+                    return;
+                }
+
+                // Renderizar com sucesso
+                const originLabel = data.usou_artigo_completo 
+                    ? `<div style="font-size:11px;color:var(--accent-green);margin-bottom:8px;font-weight:600;display:flex;align-items:center;gap:4px;">
+                         <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="vertical-align:middle"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path><polyline points="22 4 12 14.01 9 11.01"></polyline></svg>
+                         Resumo gerado com base no artigo completo original
+                       </div>`
+                    : `<div style="font-size:11px;color:var(--accent-yellow);margin-bottom:8px;font-weight:600;display:flex;align-items:center;gap:4px;">
+                         <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="vertical-align:middle"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="16" x2="12" y2="12"></line><line x1="12" y1="8" x2="12.01" y2="8"></line></svg>
+                         Resumo gerado com base nos metadados (título e lead)
+                       </div>`;
+
+                const formattedSummary = `
+                    ${originLabel}
+                    <div style="white-space: pre-wrap; margin-top:4px;">${data.resumo}</div>
+                `;
+
+                activeSummaries[index] = formattedSummary;
+                box.innerHTML = formattedSummary;
+            } catch (err) {
+                box.innerHTML = `<div style="color:var(--accent-red);font-size:12px;">Erro ao comunicar com o servidor: ${err.message}</div>`;
             }
         }
 
